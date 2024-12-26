@@ -7717,6 +7717,85 @@ describe('Model', function() {
       const ret = Test.castObject(obj, { ignoreCastErrors: true });
       assert.deepStrictEqual(ret, { nested: { num: 2 }, docArr: [{ num: 4 }] });
     });
+    it('handles discriminators (gh-15075)', async function() {
+      // Create the base shape schema
+      const shapeSchema = new mongoose.Schema({ name: String }, {
+        discriminatorKey: 'kind',
+        _id: false
+      });
+
+      // Main schema with shape array
+      const schema = new mongoose.Schema({
+        shape: [shapeSchema]
+      });
+
+      // Circle discriminator
+      schema
+        .path('shape')
+        .discriminator('Circle', new mongoose.Schema({
+          radius: {
+            type: mongoose.Schema.Types.Number,
+            required: true
+          }
+        }, { _id: false }));
+
+      // PropertyPath schema for Square
+      const propertyPathSchema = new mongoose.Schema({
+        property: {
+          type: mongoose.Schema.Types.String,
+          required: true
+        },
+        path: {
+          type: mongoose.Schema.Types.String,
+          required: true
+        }
+      }, { _id: false });
+
+      // Square discriminator
+      schema
+        .path('shape')
+        .discriminator(
+          'Square',
+          new mongoose.Schema({
+            propertyPaths: {
+              type: [propertyPathSchema],
+              required: true
+            }
+          }, { _id: false })
+        );
+
+      const TestModel = db.model('Test', schema);
+
+      const circle = { shape: [{ kind: 'Circle', radius: '5' }] };
+      const square = { shape: [{ kind: 'Square', propertyPaths: [{ property: 42 }] }] };
+
+      assert.deepStrictEqual(
+        TestModel.castObject(circle).shape[0],
+        { kind: 'Circle', radius: 5 }
+      );
+      assert.deepStrictEqual(
+        TestModel.castObject(square).shape[0],
+        { kind: 'Square', propertyPaths: [{ property: '42' }] }
+      );
+
+      const square2 = { shape: [{ kind: 'Square', propertyPaths: {} }] };
+      assert.deepStrictEqual(
+        TestModel.castObject(square2).shape[0],
+        { kind: 'Square', propertyPaths: [{}] }
+      );
+    });
+    it('handles castNonArrays when document array is set to non-array value (gh-15075)', function() {
+      const sampleSchema = new mongoose.Schema({
+        sampleArray: {
+          type: [new mongoose.Schema({ name: String })],
+          castNonArrays: false
+        }
+      });
+      const Test = db.model('Test', sampleSchema);
+
+      const obj = { sampleArray: { name: 'Taco' } };
+      assert.throws(() => Test.castObject(obj), /Tried to set nested object field `sampleArray` to primitive value/);
+    });
   });
 
   it('works if passing class that extends Document to `loadClass()` (gh-12254)', async function() {
